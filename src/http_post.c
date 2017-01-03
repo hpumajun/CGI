@@ -37,6 +37,7 @@ static void ok(int client_sockfd)
 }
 
 static void read_post_headers(int fd) {
+    int header_end = TRUE;
     // fprintf(stderr, "\n--READ HEADERS--\n\n");
     while(1)
     {
@@ -46,7 +47,13 @@ static void read_post_headers(int fd) {
         int err;
         char *header_value_start;
         char *szencryptmethod;
+        char *pszcontent_type;
         len = read_line(fd, header, sizeof(header));
+
+//        if (content_length > 0 && len > 0)
+//        {
+//            content_length = content_length - len;
+//        }
 
         if (len <= 0)
         {
@@ -58,8 +65,16 @@ static void read_post_headers(int fd) {
         msg(M_INFO, "**%s**", header);
 
         if (strcmp(header, "\n") == 0) {
-            // Empty line signals end of HTTP Headers
-            return;
+            if (header_end)
+            {
+            // Empty line signals and flag of header_end is TRUE means end of HTTP Headers
+                return;
+            }
+            else
+            {
+               header_end = TRUE;
+               continue;
+            }
         }
 
         // If the next line begins with a space or tab, it is a continuation of the previous line.
@@ -184,6 +199,16 @@ static void read_post_headers(int fd) {
         {
             strcpy(user_agent, header_value_start);
         }
+        else if (strncasecmp(header, "Content-Type",header_type_len) == 0)
+        {
+            strcpy(aszcontent,header_value_start);
+            pszcontent_type = strstr(aszcontent,"multipart");
+            if (pszcontent_type)
+            {
+                header_end = FALSE;
+            }
+
+        }
     }
 }
 
@@ -204,16 +229,18 @@ int http_post_request(st_http_session *pst_session)
         return -1;
     }
 
-    if (header_err_flag) {
-        keep_alive = FALSE;
-        bad_request(pst_session->fd);
-        return -1;
-    }
+//    if (header_err_flag) {
+//        keep_alive = FALSE;
+//        bad_request(pst_session->fd);
+//        return -1;
+//    }
     if (content_length > 0) {
+        msg(M_INFO,"content length is %d",content_length);
         content = (char*) malloc(content_length + 1);
-        read_socket(pst_session->fd, content, content_length);
+        int bytes = read_socket(pst_session->fd, content, content_length);
+        msg(M_INFO,"content is %s, bytes is %d",content, bytes);
     }
-
+    printf("adfasdf\n");
     ok(pst_session->fd);
 
     return 0;
