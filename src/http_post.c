@@ -9,7 +9,74 @@
  */
 
 #include "http_server.h"
+/***********************************MACRO DEFINE**********************************/
 
+
+typedef struct user{
+    char user[128];
+    char pwd [128];
+}USER;
+
+USER astuser[] = {
+        {"admin","hik12345"},
+        {"junma","nsn@2014"},
+};
+/********************************Private Function*********************************/
+char * get_auth_info(char * pszstr)
+{
+    ASSERT(NULL != pszstr);
+    char pauthmethod[16] = {0};
+
+
+    char * pszciphertext;
+    int authmethod_len;
+    int  uname_len;
+    pszciphertext = strchr(pszstr, ' ');
+    msg(M_INFO,"ciphertext is %s",pszciphertext);
+    authmethod_len = pszciphertext - pszstr;
+    pszciphertext++;
+    msg(M_INFO,"%d",authmethod_len);
+    memcpy(pauthmethod,pszstr,authmethod_len);
+    pauthmethod[authmethod_len] = '\0';
+    msg(M_INFO,"crypto method is %s",pauthmethod);
+//    msg(M_INFO,"ciphertext is %s",pszciphertext);
+    return pszciphertext;
+
+
+}
+
+int auth_user(char *usr,char *pwd)
+{
+    USER *pstusr;
+    pstusr = astuser;
+    int i ;
+    int size = sizeof(astuser)/sizeof(struct user);
+    for (i = 0; i < size; i ++)
+    {
+        msg(M_INFO,"-----");
+        if (0 == strcmp(astuser[i].user,usr) && 0 == strcmp(astuser[i].pwd,pwd))
+            return TRUE;
+    }
+    return FALSE;
+}
+
+int check_authorization(char *pszciphertext)
+{
+    char *user;
+    char *pwd;
+    int  uname_len;
+    char * pcipher;
+    char szplaintext[256]       = {0};
+    pcipher = get_auth_info(pszciphertext);
+    base64_decode(pcipher,szplaintext,sizeof(szplaintext));
+    pwd = strchr(szplaintext,':');
+    uname_len = (pwd++) - szplaintext;
+    szplaintext[uname_len] = '\0';
+    user = szplaintext;
+    msg(M_INFO,"user is %s,pwd is **%s**",user,pwd);
+
+    return auth_user(user,pwd);
+}
 
 /*------------------------------- Private functions --------------------------*/
 static void ok(int client_sockfd)
@@ -37,6 +104,7 @@ static void ok(int client_sockfd)
 }
 
 static void read_post_headers(int fd) {
+	char szauth[256] = {0};
     int header_end = TRUE;
     // fprintf(stderr, "\n--READ HEADERS--\n\n");
     while(1)
@@ -113,6 +181,20 @@ static void read_post_headers(int fd) {
 
         if (strncasecmp(header, "Authorization", header_type_len) == 0)
         {
+			strcpy(szauth, header_value_start);
+            msg(M_INFO,"%s", szauth);
+            int ret = check_authorization(szauth);
+            if(ret)
+            {
+                msg(M_INFO,"user is legal,");
+            }
+            else
+            {
+                msg(M_INFO,"auth user or pwd failed,please check your username and pwd");
+                Authorization = FALSE;
+                continue;
+            }
+
             msg(M_INFO,"%s",header_value_start);
             szencryptmethod = strchr(header_value_start, ' ');
             Authorization = TRUE;
