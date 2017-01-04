@@ -9,76 +9,90 @@
  */
 
 #include "http_server.h"
-/***********************************MACRO DEFINE**********************************/
-
 
 typedef struct user{
     char user[128];
     char pwd [128];
 }USER;
 
+typedef struct stbody_header_info{
+char szdcontdisp[128];
+char szcontype[128];
+}Stbody_header;
+
+typedef struct st_header_info{
+int iheaderlen;
+int icontent_length;
+char szhost[32];
+char szusragt[64];
+char szconttype[128];
+char szAuthorization[128];
+Stbody_header stbodyheader;
+}St_header_info;
+
+
 USER astuser[] = {
         {"admin","hik12345"},
         {"junma","nsn@2014"},
 };
 /********************************Private Function*********************************/
-char * get_auth_info(char * pszstr)
-{
-    ASSERT(NULL != pszstr);
-    char pauthmethod[16] = {0};
-
-
-    char * pszciphertext;
-    int authmethod_len;
-    int  uname_len;
-    pszciphertext = strchr(pszstr, ' ');
-    msg(M_INFO,"ciphertext is %s",pszciphertext);
-    authmethod_len = pszciphertext - pszstr;
-    pszciphertext++;
-    msg(M_INFO,"%d",authmethod_len);
-    memcpy(pauthmethod,pszstr,authmethod_len);
-    pauthmethod[authmethod_len] = '\0';
-    msg(M_INFO,"crypto method is %s",pauthmethod);
+//char * get_auth_info(char * pszstr)
+//{
+//    ASSERT(NULL != pszstr);
+//    char pauthmethod[16] = {0};
+//
+//
+//    char * pszciphertext;
+//    int authmethod_len;
+//    int  uname_len;
+//    pszciphertext = strchr(pszstr, ' ');
 //    msg(M_INFO,"ciphertext is %s",pszciphertext);
-    return pszciphertext;
+//    authmethod_len = pszciphertext - pszstr;
+//    pszciphertext++;
+//    msg(M_INFO,"%d",authmethod_len);
+//    memcpy(pauthmethod,pszstr,authmethod_len);
+//    pauthmethod[authmethod_len] = '\0';
+//    msg(M_INFO,"crypto method is %s",pauthmethod);
+////    msg(M_INFO,"ciphertext is %s",pszciphertext);
+//    return pszciphertext;
+//
+//
+//}
+//
+//int auth_user(char *usr,char *pwd)
+//{
+//    USER *pstusr;
+//    pstusr = astuser;
+//    int i ;
+//    int size = sizeof(astuser)/sizeof(struct user);
+//    for (i = 0; i < size; i ++)
+//    {
+//        msg(M_INFO,"-----");
+//        if (0 == strcmp(astuser[i].user,usr) && 0 == strcmp(astuser[i].pwd,pwd))
+//            return TRUE;
+//    }
+//    return FALSE;
+//}
+//
+//int check_authorization(char *pszciphertext)
+//{
+//    char *user;
+//    char *pwd;
+//    int  uname_len;
+//    char * pcipher;
+//    char szplaintext[256]       = {0};
+//    pcipher = get_auth_info(pszciphertext);
+//    base64_decode(pcipher,szplaintext,sizeof(szplaintext));
+//    pwd = strchr(szplaintext,':');
+//    uname_len = (pwd++) - szplaintext;
+//    szplaintext[uname_len] = '\0';
+//    user = szplaintext;
+//    msg(M_INFO,"user is %s,pwd is **%s**",user,pwd);
+//
+//    return auth_user(user,pwd);
+//}
 
 
-}
-
-int auth_user(char *usr,char *pwd)
-{
-    USER *pstusr;
-    pstusr = astuser;
-    int i ;
-    int size = sizeof(astuser)/sizeof(struct user);
-    for (i = 0; i < size; i ++)
-    {
-        msg(M_INFO,"-----");
-        if (0 == strcmp(astuser[i].user,usr) && 0 == strcmp(astuser[i].pwd,pwd))
-            return TRUE;
-    }
-    return FALSE;
-}
-
-int check_authorization(char *pszciphertext)
-{
-    char *user;
-    char *pwd;
-    int  uname_len;
-    char * pcipher;
-    char szplaintext[256]       = {0};
-    pcipher = get_auth_info(pszciphertext);
-    base64_decode(pcipher,szplaintext,sizeof(szplaintext));
-    pwd = strchr(szplaintext,':');
-    uname_len = (pwd++) - szplaintext;
-    szplaintext[uname_len] = '\0';
-    user = szplaintext;
-    msg(M_INFO,"user is %s,pwd is **%s**",user,pwd);
-
-    return auth_user(user,pwd);
-}
-
-/*------------------------------- Private functions --------------------------*/
 static void ok(int client_sockfd)
 {
     char buffer[8096];
@@ -103,9 +117,10 @@ static void ok(int client_sockfd)
     write_socket(client_sockfd, body, strlen(body));
 }
 
-static void read_post_headers(int fd) {
-	char szauth[256] = {0};
-    int header_end = TRUE;
+static void read_post_headers(int fd,St_header_info *pstreq_header_info)
+{
+
+    int ibodyflag = 0;
     // fprintf(stderr, "\n--READ HEADERS--\n\n");
     while(1)
     {
@@ -116,6 +131,7 @@ static void read_post_headers(int fd) {
         char *header_value_start;
         char *szencryptmethod;
         char *pszcontent_type;
+        char *pszboundary;
         len = read_line(fd, header, sizeof(header));
 
 //        if (content_length > 0 && len > 0)
@@ -129,26 +145,26 @@ static void read_post_headers(int fd) {
             header_err_flag = TRUE;
             continue;
         }
-
+        pstreq_header_info->iheaderlen += len;
         msg(M_INFO, "**%s**", header);
 
-        if (strcmp(header, "\n") == 0) {
-            if (header_end)
-            {
+        if (strcmp(header, "\n") == 0)
+        {
             // Empty line signals and flag of header_end is TRUE means end of HTTP Headers
-                return;
-            }
-            else
-            {
-               header_end = TRUE;
-               continue;
-            }
-        }
+            return;
 
+        }
+        if (strstr(header,"--------------------------") != NULL )
+        {
+            ibodyflag = 1;
+            continue;
+        }
         // If the next line begins with a space or tab, it is a continuation of the previous line.
         err = recv(fd, &next, 1, MSG_PEEK);
-        while (isspace(next) && next != '\n' && next != '\r') {
-            if (err) {
+        while (isspace(next) && next != '\n' && next != '\r')
+        {
+            if (err)
+            {
                 fprintf(stderr, "header space/tab continuation check err\n");
                 // Not sure what to do in this scenario
             }
@@ -158,6 +174,7 @@ static void read_post_headers(int fd) {
             // Concatenate the next line to the current running header line
             len = len + read_line(fd, header + len, sizeof(header) - len);
             err = recv(fd, &next, 1, MSG_PEEK);
+
         }
 
         // Find first occurence of colon, to split by header type and value
@@ -173,53 +190,22 @@ static void read_post_headers(int fd) {
         // Increment header value start past colon
         header_value_start++;
         // Increment header value start to first non-space character
-        while (isspace(*header_value_start) && (*header_value_start != '\n') && (*header_value_start != '\r')) {
+        while (isspace(*header_value_start) && (*header_value_start != '\n') && (*header_value_start != '\r'))
+        {
             header_value_start++;
         }
 //        int header_value_len = len - (header_value_start - header);
 
-
         if (strncasecmp(header, "Authorization", header_type_len) == 0)
         {
-			strcpy(szauth, header_value_start);
-            msg(M_INFO,"%s", szauth);
-            int ret = check_authorization(szauth);
-            if(ret)
-            {
-                msg(M_INFO,"user is legal,");
-            }
-            else
-            {
-                msg(M_INFO,"auth user or pwd failed,please check your username and pwd");
-                Authorization = FALSE;
-                continue;
-            }
-
             msg(M_INFO,"%s",header_value_start);
             szencryptmethod = strchr(header_value_start, ' ');
             Authorization = TRUE;
         }
         else if (strncasecmp(header, "Content-Length", header_type_len) == 0)
         {
-            content_length = atoi(header_value_start);
+            pstreq_header_info->icontent_length = atoi(header_value_start);
         }
-
-        else if (strncasecmp(header, "content", header_type_len) == 0)
-        {
-            // Copy everything but trailing newline to buffer
-            char *modified_since_buffer = (char*) malloc(sizeof(char) * strlen(header_value_start));
-            strncpy(modified_since_buffer, header_value_start, strlen(header_value_start) - 1);
-
-            // Get actual time structure for received time
-            strptime(modified_since_buffer, "%a, %d %b %Y %T %Z", if_modified_since);
-            free(modified_since_buffer);
-
-            if (if_modified_since == NULL)
-            {
-                time_is_valid = FALSE;
-            }
-        }
-
         else if (strncasecmp(header, "Accept", header_type_len) == 0)
         {
             char *traverse = header_value_start;
@@ -247,35 +233,9 @@ static void read_post_headers(int fd) {
                 traverse = temporary;
             }
         }
-        else if (strncasecmp(header, "Accept-Charset", header_type_len) == 0)
-        {
-            char *traverse = header_value_start;
-            char *temporary;
-            acceptable_charset = FALSE;
-            while (1)
-            {
-                if (strncasecmp(traverse, "ISO-8859-1", strlen("ISO-8859-1")) == 0)
-                {
-                    acceptable_charset = TRUE;
-                    break;
-                }
-                temporary = strchr(traverse, ',');
-                if(temporary == NULL)
-                    break;
-                // Skip past comma
-                temporary++;
-                while(isspace(*temporary))
-                    temporary++;
-                traverse = temporary;
-            }
-        }
         else if (strncasecmp(header, "Accept-Encoding", header_type_len) == 0)
         {
             acceptable_encoding = FALSE;
-        }
-        else if (strncasecmp(header, "From", header_type_len) == 0)
-        {
-            strcpy(from_email, header_value_start);
         }
         else if (strncasecmp(header, "User-Agent", header_type_len) == 0)
         {
@@ -283,25 +243,47 @@ static void read_post_headers(int fd) {
         }
         else if (strncasecmp(header, "Content-Type",header_type_len) == 0)
         {
-            strcpy(aszcontent,header_value_start);
-            pszcontent_type = strstr(aszcontent,"multipart");
-            if (pszcontent_type)
+            if(ibodyflag)
             {
-                header_end = FALSE;
+                strcpy(pstreq_header_info->stbodyheader.szcontype, header_value_start);
             }
-
+            else
+            {
+                strcpy(pstreq_header_info->szconttype,header_value_start);
+            }
         }
     }
 }
 
+static void write_file(int fd, int ilength,char *pszboundary)
+{
+    char header[8096];
+    int len;
+    char szfilename[128] = { 0 };
+    St_header_info stheaderinfo ;
+    read_post_headers(fd, &stheaderinfo);
+
+    ilength -=stheaderinfo.icontent_length ;
+    while(ilength > 0)
+    {
+        len = read_line(fd, header, sizeof(header));
+        ilength -= len;
+        msg(M_INFO,"%s",header);
+        if (strstr(header,))
+    }
+
+}
 
 int http_post_request(st_http_session *pst_session)
 {
     int pf;
+    int ilength;
+    char pszboundary ;
+    St_header_info st_http_req_header_info;
     ASSERT(pst_session->fd > 0);
-
+    memset(&st_http_req_header_info, 0, sizeof(st_http_req_header_info));
     msg(M_INFO,"this is post request");
-    read_post_headers(pst_session->fd);
+    read_post_headers(pst_session->fd,&st_http_req_header_info);
     printf("adfasdf\n");
     if (!Authorization)
     {
@@ -311,16 +293,25 @@ int http_post_request(st_http_session *pst_session)
         return -1;
     }
 
-//    if (header_err_flag) {
-//        keep_alive = FALSE;
-//        bad_request(pst_session->fd);
-//        return -1;
-//    }
-    if (content_length > 0) {
-        msg(M_INFO,"content length is %d",content_length);
-        content = (char*) malloc(content_length + 1);
-        int bytes = read_socket(pst_session->fd, content, content_length);
-        msg(M_INFO,"content is %s, bytes is %d",content, bytes);
+    pszboundary = strstr(st_http_req_header_info.szconttype,"boundary=");
+    msg(M_INFO, "boundary is **%s**",pszboundary);
+    if(pszboundary)
+    {
+        pszboundary = strstr(pszboundary, "----");
+        msg(M_INFO, "boundary is *%s*, len is %d",pszboundary,sizeof(pszboundary));
+    }
+
+    ilength = st_http_req_header_info.icontent_length;
+    if ( ilength > 0)
+    {
+        msg(M_INFO,"content length is %d",ilength);
+
+//        content = (char*) malloc(ilength + 1);
+//
+//        int bytes = read_socket(pst_session->fd,content,ilength);
+//        msg(M_INFO,"content is %s, bytes is %d\n",content, bytes);
+//        fflush(stdout);
+        write_file(pst_session->fd,ilength,char *pszboundary);
     }
     printf("adfasdf\n");
     ok(pst_session->fd);
