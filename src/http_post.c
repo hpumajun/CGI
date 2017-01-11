@@ -16,88 +16,15 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/socket.h>
-typedef struct user{
-    char user[128];
-    char pwd [128];
-}USER;
+#include "error.h"
+/*------------------------------ Private variables ---------------------------*/
 
-typedef struct stbody_header_info{
-char szdcontdisp[128];
-char szcontype[128];
-}Stbody_header;
-
-typedef struct st_header_info{
-int iheaderlen;
-int icontent_length;
-char szhost[32];
-char szusragt[64];
-char szconttype[128];
-char szAuthorization[128];
-Stbody_header stbodyheader;
-}St_header_info;
-
-
-USER astuser[] = {
-        {"admin","hik12345"},
-        {"junma","nsn@2014"},
-};
-/********************************Private Function*********************************/
-//char * get_auth_info(char * pszstr)
-//{
-//    ASSERT(NULL != pszstr);
-//    char pauthmethod[16] = {0};
-//
-//
-//    char * pszciphertext;
-//    int authmethod_len;
-//    int  uname_len;
-//    pszciphertext = strchr(pszstr, ' ');
-//    msg(M_INFO,"ciphertext is %s",pszciphertext);
-//    authmethod_len = pszciphertext - pszstr;
-//    pszciphertext++;
-//    msg(M_INFO,"%d",authmethod_len);
-//    memcpy(pauthmethod,pszstr,authmethod_len);
-//    pauthmethod[authmethod_len] = '\0';
-//    msg(M_INFO,"crypto method is %s",pauthmethod);
-////    msg(M_INFO,"ciphertext is %s",pszciphertext);
-//    return pszciphertext;
-//
-//
-//}
-//
-//int auth_user(char *usr,char *pwd)
-//{
-//    USER *pstusr;
-//    pstusr = astuser;
-//    int i ;
-//    int size = sizeof(astuser)/sizeof(struct user);
-//    for (i = 0; i < size; i ++)
-//    {
-//        msg(M_INFO,"-----");
-//        if (0 == strcmp(astuser[i].user,usr) && 0 == strcmp(astuser[i].pwd,pwd))
-//            return TRUE;
-//    }
-//    return FALSE;
-//}
-//
-//int check_authorization(char *pszciphertext)
-//{
-//    char *user;
-//    char *pwd;
-//    int  uname_len;
-//    char * pcipher;
-//    char szplaintext[256]       = {0};
-//    pcipher = get_auth_info(pszciphertext);
-//    base64_decode(pcipher,szplaintext,sizeof(szplaintext));
-//    pwd = strchr(szplaintext,':');
-//    uname_len = (pwd++) - szplaintext;
-//    szplaintext[uname_len] = '\0';
-//    user = szplaintext;
-//    msg(M_INFO,"user is %s,pwd is **%s**",user,pwd);
-//
-//    return auth_user(user,pwd);
-//}
-
+static char apszurl[][128] = {"/cgi-bin/admin/upload_ovpn_key.cgi",
+                             "/cgi-bin/admin/upload_ovpn_ca.cgi",
+                             "/cgi-bin/admin/upload_ovpn_clientcrt.cgi",
+                             "/cgi-bin/admin/upload_ovpn_clientkey.cgi",
+                             "/cgi-bin/admin/upload_ovpn_conffile.cgi",
+                             };
 
 static void ok(int client_sockfd)
 {
@@ -125,7 +52,6 @@ static void ok(int client_sockfd)
 
 static void read_post_headers(int fd,St_header_info *pstreq_header_info)
 {
-
     int ibodyflag = 0;
     // fprintf(stderr, "\n--READ HEADERS--\n\n");
     while(1)
@@ -136,6 +62,7 @@ static void read_post_headers(int fd,St_header_info *pstreq_header_info)
         int err;
         char *header_value_start;
         char *szencryptmethod;
+        char *pszciphertext;
         char *pszcontent_type;
         char *pszboundary;
         len = read_line(fd, header, sizeof(header));
@@ -152,7 +79,7 @@ static void read_post_headers(int fd,St_header_info *pstreq_header_info)
             continue;
         }
         pstreq_header_info->iheaderlen += len;
-        msg(M_INFO, "**%s**", header);
+        printf( "**%s**", header);
 
         if (strcmp(header, "\n") == 0)
         {
@@ -162,7 +89,7 @@ static void read_post_headers(int fd,St_header_info *pstreq_header_info)
         }
         if (strstr(header,"--------------------------") != NULL )
         {
-            msg(M_INFO,"this is body header");
+            printf("this is body header");
             ibodyflag = 1;
             continue;
         }
@@ -205,9 +132,18 @@ static void read_post_headers(int fd,St_header_info *pstreq_header_info)
 
         if (strncasecmp(header, "Authorization", header_type_len) == 0)
         {
-            msg(M_INFO,"%s",header_value_start);
+            pstreq_header_info->stauth.ucflag = TRUE;
+            printf("%s",header_value_start);
             szencryptmethod = strchr(header_value_start, ' ');
-            Authorization = TRUE;
+            len = szencryptmethod-header_value_start ;
+            memcpy(pstreq_header_info->stauth.szauth_method,header_value_start,len);
+            pstreq_header_info->stauth.szauth_method[len+1] = '\0';
+
+            szencryptmethod++;
+            pszciphertext = strchr(szencryptmethod,'\n');
+            len = pszciphertext - szencryptmethod;
+            memcpy(pstreq_header_info->stauth.szauth_cipher,szencryptmethod,len);
+            pstreq_header_info->stauth.szauth_cipher[len+1] = '\0';
         }
         else if (strncasecmp(header, "Content-Length", header_type_len) == 0)
         {
@@ -326,41 +262,59 @@ static int write_file(int fd, int ilength,char *pszboundary)
 
 int http_post_request(st_http_session *pst_session)
 {
-    int ret;
+    int ret,cmdindex;
     int pf;
     int ilength;
     char *pszboundary ;
     St_header_info st_http_req_header_info;
     ASSERT(pst_session->fd > 0);
+
+    cmdindex = checkurl(pst_session->szurl,apszurl,5);
+    printf("%d\n",cmdindex);
+    if(!ret)
+    {
+        not_found(pst_session->fd);
+        keep_alive = FALSE;
+        return 0;
+    }
     memset(&st_http_req_header_info, 0, sizeof(st_http_req_header_info));
-    msg(M_INFO,"this is post request");
     read_post_headers(pst_session->fd,&st_http_req_header_info);
     printf("adfasdf\n");
-    if (!Authorization)
+    if (!st_http_req_header_info.stauth.ucflag)
     {
-        msg(M_INFO,"unauthorized");
+        printf("unauthorized\n");
         Unauthorized_response(pst_session->fd);
         keep_alive = FALSE;
-        return -1;
+        return 0;
     }
-
+    else
+    {
+        ret = check_authorization(st_http_req_header_info.stauth.szauth_cipher);
+        if(!ret)
+        {
+            printf("Please check your username and pwd!\n");
+            Authorizedfailed_response(pst_session->fd);
+            keep_alive = FALSE;
+            return ret;
+        }
+    }
     pszboundary = strstr(st_http_req_header_info.szconttype,"boundary=");
-    msg(M_INFO, "boundary is **%s**",pszboundary);
+    printf( "boundary is **%s**",pszboundary);
     if(pszboundary)
     {
         pszboundary = strstr(pszboundary, "----");
-        msg(M_INFO, "boundary is *%s*, len is %d",pszboundary,strlen(pszboundary));
+        printf( "boundary is *%s*, len is %d",pszboundary,strlen(pszboundary));
     }
 
     ilength = st_http_req_header_info.icontent_length;
     if ( ilength > 0)
     {
-        msg(M_INFO,"content length is %d",ilength);
+        printf("content length is %d",ilength);
 
 //        content = (char*) malloc(ilength + 1);
 //
 //        int bytes = read_socket(pst_session->fd,content,ilength);
-//        msg(M_INFO,"content is %s, bytes is %d\n",content, bytes);
+//        printf("content is %s, bytes is %d\n",content, bytes);
 //        fflush(stdout);
         ret = write_file(pst_session->fd, ilength, pszboundary);
         if (ret < 0 )
@@ -373,3 +327,4 @@ int http_post_request(st_http_session *pst_session)
 
     return 0;
 }
+

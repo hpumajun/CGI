@@ -16,14 +16,34 @@
 
 /*---------------------------------- Includes -------------___----------------*/
 #include <time.h>
+#include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <strings.h>
 #include "http_server.h"
 #include "http_get.h"
-
-/*------------------------------- Private typedef ----------------------------*/
+#include "error.h"
 /*-------------------------------- Private macro -----------------------------*/
+#define CHECKSTATUS    0
+#define VPN_START      1
+#define VPN_STOP       2
+#define VPN_RESTART    3
 /*------------------------------ Private variables ---------------------------*/
-/*--------------------------- Private function prototypes --------------------*/
+static char apszurl[][128] = {"/cgi-bin/admin/vpn_check_status.cgi",
+                          "/cgi-bin/admin/vpn_start.cgi",
+                          "/cgi-bin/admin/vpn_stop.cgi",
+                          "/cgi-bin/admin/vpn_restart.cgi",
+                         };
 
+/*--------------------------- Private function prototypes --------------------*/
+static void returnvpnstatus(int fd)
+{
+    printf("vpn is running\n");
+}
+static void wakeupvpn()
+{
+
+}
 
 void forbidden(int client_sockfd) {
     // 403 Error
@@ -45,6 +65,7 @@ void forbidden(int client_sockfd) {
 
     write_socket(client_sockfd, body, strlen(body));
 }
+
 
 int is_valid_fname(char *fname) {
     char *it = fname;
@@ -104,15 +125,55 @@ static void ok(int client_sockfd,char *body)
     free(body);
 }
 
+
+static void dealwithcgi(int cgicmdindex,int fd)
+{
+    ASSERT(INVALID != cgicmdindex);
+    switch (cgicmdindex)
+    {
+        case CHECKSTATUS:
+            returnvpnstatus(fd);
+            break;
+        case VPN_START :
+ //           openvpn_start();
+            break;
+        case VPN_STOP:
+//            openvpn_stop();
+            break;
+        case VPN_RESTART:
+//            openvpn_restart_client();
+            break;
+        default:
+            forbidden(fd);
+            break;
+    }
+
+}
+
 /*------------------------------- Private functions --------------------------*/
 
 
 int http_get(st_http_session *pst_session)
 {
 
-    ASSERT(pst_session->fd > 0);
+    int ret;
+    int cmdindex;
+    int urlcnt ;
+    St_header_info st_http_req_header_info;
 
-    read_headers(pst_session->fd);
+    ASSERT(pst_session);
+    memset(&st_http_req_header_info, 0, sizeof(st_http_req_header_info));
+    read_headers(pst_session->fd,&st_http_req_header_info);
+
+    urlcnt = sizeof(apszurl)/sizeof(apszurl[0]);
+    cmdindex = checkurl(pst_session->szurl, apszurl, urlcnt);
+    printf("%d\n",cmdindex);
+    if(INVALID == ret)
+    {
+        not_found(pst_session->fd);
+        keep_alive = FALSE;
+        return 0;
+    }
 
     if (header_err_flag) {
         keep_alive = FALSE;
@@ -166,7 +227,7 @@ int http_get(st_http_session *pst_session)
 
     // Fix filename
     char file_path[512];
-    sprintf(file_path, "doc%s", pst_session->pszurl);
+    sprintf(file_path, "doc%s", pst_session->szurl);
     if (file_path[strlen(file_path)-1] == '/') {
         file_path[strlen(file_path)-1] = '\0';
     }
@@ -177,11 +238,6 @@ int http_get(st_http_session *pst_session)
 
     struct stat file_info;
 
-    if (!Authorization)
-    {
-        Unauthorized_response(pst_session->fd);
-        return 0;
-    }
     if (!fname_valid) {
         // invalid filename
         fprintf(stderr, "403 Forbidden: Invalid file name\n");
@@ -192,7 +248,7 @@ int http_get(st_http_session *pst_session)
     if (stat(file_path, &file_info)) {
         msg(M_ERRNO_SOCK, "404 Not Found %s: Stat failed\n",file_path);
         // Stat failed
-        not_found();
+        not_found(pst_session->fd);
         return 1;
     }
 
@@ -214,7 +270,7 @@ int http_get(st_http_session *pst_session)
     FILE *f = fopen(file_path, "r");
     if (f == NULL) {
         // No file
-        not_found();
+        not_found(pst_session->fd);
         fprintf(stderr, "404 Not Found: Unable to open file\n");
         return 0;
     }
